@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, PutObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
 export async function POST(req: NextRequest) {
@@ -35,17 +35,19 @@ export async function POST(req: NextRequest) {
       Bucket: bucket,
       Key: `uploads/${Date.now()}-${filename.replace(/[^a-zA-Z0-9.\-_]/g, '')}`,
       ContentType: contentType,
-      // For public bucket. If it's private, we need a GET presigned URL for Gladia
-      // ACL: 'public-read', 
     });
 
-    // Create a presigned URL that is valid for 1 hour
-    const presignedUrl = await getSignedUrl(s3Client, command, { expiresIn: 3600 });
-    const publicUrl = endpoint 
-      ? `${endpoint}/${bucket}/${command.input.Key}` 
-      : `https://${bucket}.s3.${region}.amazonaws.com/${command.input.Key}`;
+    const getCommand = new GetObjectCommand({
+      Bucket: bucket,
+      Key: command.input.Key,
+    });
 
-    return NextResponse.json({ success: true, url: presignedUrl, publicUrl, key: command.input.Key });
+    // Create a presigned URL for uploading that is valid for 1 hour
+    const presignedUrl = await getSignedUrl(s3Client, command, { expiresIn: 3600 });
+    // Create a presigned URL for downloading (used by Gladia AI) valid for 6 hours
+    const downloadUrl = await getSignedUrl(s3Client, getCommand, { expiresIn: 21600 });
+
+    return NextResponse.json({ success: true, url: presignedUrl, publicUrl: downloadUrl, key: command.input.Key });
   } catch (error: any) {
     console.error('Error generating presigned URL:', error);
     return NextResponse.json({ error: 'Failed to generate upload URL' }, { status: 500 });
