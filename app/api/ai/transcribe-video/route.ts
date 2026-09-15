@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import crypto from 'crypto';
-import { writeFile, mkdir } from 'fs/promises';
+import { writeFile, mkdir, readFile } from 'fs/promises';
 import { join } from 'path';
 import fs from 'fs';
 
@@ -24,52 +24,68 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, error: 'Gladia API Key is required. Please set it in Settings.' }, { status: 400 });
     }
 
-    if (!file) {
+    const videoUrl = formData.get('videoUrl') as string;
+
+    if (!file && !videoUrl) {
       return NextResponse.json({ error: 'No video provided' }, { status: 400 });
     }
 
-    // Save video locally first because Gladia SDK usually prefers a local path or URL
-    const uploadDir = join(process.cwd(), 'public', 'uploads');
-    await ensureDir(uploadDir);
-
-    const sessionId = crypto.randomUUID();
-    const ext = file.name.split('.').pop() || 'mp4';
-    const videoPath = join(uploadDir, `${sessionId}-video.${ext}`);
-    
-    const buffer = Buffer.from(await file.arrayBuffer());
-    await writeFile(videoPath, buffer);
-
-    // Caching layer
+    let audioUrl = videoUrl;
+    let videoPath = '';
     const { generateHash, getCachedData, setCachedData } = await import('@/lib/cache');
-    const fileHash = generateHash(buffer);
+    let fileHash = '';
+
+    if (videoUrl) {
+      // Use the URL as the cache key hash
+      fileHash = crypto.createHash('md5').update(videoUrl).digest('hex');
+    } else {
+      // Save video locally first because Gladia SDK usually prefers a local path or URL
+      const uploadDir = join(process.cwd(), 'public', 'uploads');
+      await ensureDir(uploadDir);
+
+      const sessionId = crypto.randomUUID();
+      const ext = file.name.split('.').pop() || 'mp4';
+      videoPath = join(uploadDir, `${sessionId}-video.${ext}`);
+      
+      const buffer = Buffer.from(await file.arrayBuffer());
+      await writeFile(videoPath, buffer);
+
+      fileHash = generateHash(buffer);
+    }
+
     const cachedSubtitles = await getCachedData(fileHash);
 
     if (cachedSubtitles) {
       // Cleanup temp file since we don't need it
-      try { fs.unlinkSync(videoPath); } catch (e) {}
+      if (videoPath) {
+        try { fs.unlinkSync(videoPath); } catch (e) {}
+      }
       // Update the voice field just in case they selected a different voice this time
       const updatedSubtitles = (cachedSubtitles as any[]).map(s => ({...s, voice}));
       return NextResponse.json({ success: true, subtitles: updatedSubtitles, cached: true });
     }
 
-    // 1. Upload the file to Gladia
-    const uploadFormData = new FormData();
-    uploadFormData.append('audio', new Blob([buffer]), file.name);
+    if (!audioUrl && file) {
+      const buffer = await readFile(videoPath);
+      // 1. Upload the file to Gladia
+      const uploadFormData = new FormData();
+      uploadFormData.append('audio', new Blob([buffer]), file.name);
 
-    const uploadRes = await fetch('https://api.gladia.io/v2/upload', {
-      method: 'POST',
-      headers: {
-        'x-gladia-key': gladiaApiKey
-      },
-      body: uploadFormData
-    });
+      const uploadRes = await fetch('https://api.gladia.io/v2/upload', {
+        method: 'POST',
+        headers: {
+          'x-gladia-key': gladiaApiKey
+        },
+        body: uploadFormData
+      });
 
-    if (!uploadRes.ok) {
-      const err = await uploadRes.text();
-      throw new Error('Failed to upload file to Gladia: ' + err);
+      if (!uploadRes.ok) {
+        const err = await uploadRes.text();
+        throw new Error('Failed to upload file to Gladia: ' + err);
+      }
+      const uploadData = await uploadRes.json();
+      audioUrl = uploadData.audio_url;
     }
-    const uploadData = await uploadRes.json();
-    const audioUrl = uploadData.audio_url;
 
     // 2. Request transcription
     const transcribeRes = await fetch('https://api.gladia.io/v2/transcription', {

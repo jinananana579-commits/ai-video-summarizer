@@ -85,8 +85,44 @@ export default function SubtitleEditor() {
           targetVideoBlob = await res.blob();
         }
 
+        // Try getting a presigned URL for direct upload to bypass Vercel 4.5MB limit
+        let uploadedVideoUrl = null;
+        try {
+          const presignRes = await fetch('/api/upload/presign', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              filename: video.name || 'video.mp4',
+              contentType: targetVideoBlob.type || 'video/mp4'
+            })
+          });
+          
+          if (presignRes.ok) {
+            const presignData = await presignRes.json();
+            setStatusText(`Uploading ${video.name} to Cloud Storage...`);
+            const uploadRes = await fetch(presignData.url, {
+              method: 'PUT',
+              body: targetVideoBlob,
+              headers: { 'Content-Type': targetVideoBlob.type || 'video/mp4' }
+            });
+            
+            if (uploadRes.ok) {
+              uploadedVideoUrl = presignData.publicUrl;
+            } else {
+              console.warn("Direct upload failed, falling back to local upload.");
+            }
+          }
+        } catch (e) {
+          console.warn("Could not get presigned URL, falling back to direct API upload.", e);
+        }
+
+        setStatusText(`Transcribing ${video.name} (${i + 1}/${playlist.length})...`);
         const transcribeFormData = new FormData();
-        transcribeFormData.append('video', targetVideoBlob, video.name || 'video.mp4');
+        if (uploadedVideoUrl) {
+          transcribeFormData.append('videoUrl', uploadedVideoUrl);
+        } else {
+          transcribeFormData.append('video', targetVideoBlob, video.name || 'video.mp4');
+        }
         transcribeFormData.append('voice', globalVoice);
         transcribeFormData.append('gladiaApiKey', gladiaApiKey);
 
