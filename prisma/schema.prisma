@@ -1,0 +1,120 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Account {
+  id                 String  @id @default(cuid())
+  userId             String  @map("user_id")
+  type               String
+  provider           String
+  providerAccountId  String  @map("provider_account_id")
+  refresh_token      String? @db.Text
+  access_token       String? @db.Text
+  expires_at         Int?
+  token_type         String?
+  scope              String?
+  id_token           String? @db.Text
+  session_state      String?
+ 
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+ 
+  @@unique([provider, providerAccountId])
+  @@map("accounts")
+}
+ 
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique @map("session_token")
+  userId       String   @map("user_id")
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+ 
+  @@map("sessions")
+}
+ 
+enum Role {
+  USER
+  ADMIN
+}
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String?   @unique
+  emailVerified DateTime? @map("email_verified")
+  image         String?
+  password      String?
+  role          Role      @default(USER)
+  credits       Int       @default(10)
+  subscriptionEnd DateTime?
+  accounts      Account[]
+  sessions      Session[]
+  projects      Project[]
+ 
+  @@map("users")
+}
+ 
+model VerificationToken {
+  identifier String
+  token      String
+  expires    DateTime
+ 
+  @@unique([identifier, token])
+  @@map("verification_tokens")
+}
+
+model Project {
+  id                String   @id @default(uuid())
+  name              String
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  
+  // Global Settings
+  speechRate        Float    @default(1.2)
+  aspectRatio       String   @default("original")
+  bgMusicUrl        String?
+  bgMusicVolume     Float    @default(20.0)
+  globalVoice       String   @default("Khmer - Piseth")
+  syncVoice         Boolean  @default(true)
+  burnSubtitles     Boolean  @default(true)
+  burnLogoWatermark Boolean  @default(true)
+  coverWatermark    String?  // JSON string
+  subtitleStyle     String?  // JSON string
+
+  // Relations
+  userId            String?
+  user              User?       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  videos            VideoFile[]
+  subtitles         Subtitle[]
+}
+
+model VideoFile {
+  id        String   @id @default(uuid())
+  projectId String
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  
+  name      String
+  url       String   // Local path or URL
+  trimStart Float?
+  trimEnd   Float?
+  
+  order     Int      // To keep track of playlist order
+}
+
+model Subtitle {
+  id            String   @id @default(uuid())
+  projectId     String
+  project       Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  
+  start         Float
+  end           Float
+  text          String
+  voice         String
+  audioUrl      String?
+  audioDuration Float?
+}
