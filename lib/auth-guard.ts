@@ -9,10 +9,8 @@ export async function checkCreditsAndSubscription(requiredCredits: number = 1) {
   const session = await getServerSession(authOptions);
   
   if (!session || !session.user) {
-    if (process.env.NODE_ENV === 'development') {
-      return { success: true, userId: "dev-user", user: { id: "dev-user", credits: 9999 } };
-    }
-    return { success: false, status: 401, error: "Unauthorized. Please log in." };
+    // Bypass auth for personal tool usage on Vercel
+    return { success: true, userId: "dev-user", user: { id: "dev-user", credits: 9999 } };
   }
 
   // @ts-ignore
