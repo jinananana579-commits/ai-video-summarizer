@@ -80,6 +80,9 @@ Return the response in valid JSON matching this schema:
       }
     }
 
+    if (!result) {
+      throw new Error("Gemini API failed to return a result.");
+    }
     const text = result.response.text();
     let brollPlan = [];
     try {
